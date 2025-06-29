@@ -1,0 +1,19 @@
+[project]
+name = "asst"
+version = "0.1.0"
+description = "Medical Assistant AI Agent with Memory Management"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=2.9.0",
+    "langchain-groq>=0.3.4",
+    "mcp>=1.9.4",
+    "qdrant-client>=1.14.3",
+    "sentence-transformers>=4.1.0",
+    "streamlit>=1.29.0",
+    "pandas>=2.0.0",
+    "plotly>=5.0.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "aiohttp>=3.8.0",
+]
