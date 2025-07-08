@@ -1,69 +1,116 @@
 from typing import Dict
-from mcp.server.fastmcp import FastMCP
-import sqlite3
+from fastmcp import FastMCP
+from pymongo import MongoClient
+import os
+from dotenv import load_dotenv
+from datetime import datetime
 
-mcp = FastMCP("EpisodicMemory", port=8002)  # Unique name and port
+load_dotenv()
+mcp = FastMCP("EpisodicMemory")
 
-DB_PATH = "medical_memory.db"
+# MongoDB configuration
+MONGODB_URI = os.getenv("MongoDB_URI")
+DB_NAME = "Medical_Records"
+COLLECTION_NAME = "episodic"
+
+def get_mongodb_collection():
+    """Get MongoDB collection"""
+    client = MongoClient(MONGODB_URI)
+    db = client[DB_NAME]
+    return db[COLLECTION_NAME]
 
 @mcp.tool()
 async def get_episodic_memory(patient_id: str) -> Dict[str, str]:
     """
     Return the most recent visit data for the patient as episodic memory.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    try:
+        collection = get_mongodb_collection()
 
-    cursor.execute("""
-        SELECT date, symptoms, diagnosis, prescription
-        FROM visits
-        WHERE patient_id = ?
-        ORDER BY date DESC
-        LIMIT 1
-    """, (patient_id,))
-    row = cursor.fetchone()
-    conn.close()
+        # Find the most recent visit for the patient
+        visit = collection.find_one(
+            {"patient_id": patient_id},
+            sort=[("date", -1)]
+        )
 
-    if row:
-        date, symptoms, diagnosis, prescription = row
+        if visit:
+            date = visit.get("date", "Unknown date")
+            symptoms = visit.get("symptoms", "No symptoms recorded")
+            diagnosis = visit.get("diagnosis", "No diagnosis")
+            prescription = visit.get("prescription", "No prescription")
+
+            return {
+                "memory_type": "episodic",
+                "content": f"On {date}, the patient had {symptoms} and was diagnosed with {diagnosis}. "
+                           f"They were treated with {prescription}."
+            }
+        else:
+            return {
+                "memory_type": "episodic",
+                "content": "No visit history found for this patient."
+            }
+    except Exception as e:
         return {
             "memory_type": "episodic",
-            "content": f"On {date}, the patient had {symptoms} and was diagnosed with {diagnosis}. "
-                       f"They were treated with {prescription}."
-        }
-    else:
-        return {
-            "memory_type": "episodic",
-            "content": "No visit history found for this patient."
+            "content": f"Error retrieving episodic memory: {str(e)}"
         }
     
 @mcp.tool()
 async def add_episodic_memory(
     patient_id: str,
-    visit_date: str,
+    date: str,
     symptoms: str,
     diagnosis: str,
     prescription: str
 ) -> Dict[str, str]:
     """
-    Adds a new episodic memory (visit event) to the visits table.
+    Adds a new episodic memory (visit event) to MongoDB.
+    Compatible with MCP Client Adapter.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    try:
+        collection = get_mongodb_collection()
 
-    cursor.execute("""
-        INSERT INTO visits (patient_id, date, symptoms, diagnosis, prescription)
-        VALUES (?, ?, ?, ?, ?)
-    """, (patient_id, visit_date, symptoms, diagnosis, prescription))
+        # Create visit document
+        visit_doc = {
+            "patient_id": patient_id,
+            "date": date,
+            "symptoms": symptoms,
+            "diagnosis": diagnosis,
+            "prescription": prescription,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
+        }
 
-    conn.commit()
-    conn.close()
+        # Insert into MongoDB
+        result = collection.insert_one(visit_doc)
 
-    return {
-        "status": "stored",
-        "memory_type": "episodic",
-        "visit_date": visit_date
-    }
+        return {
+            "success": True,
+            "status": "stored",
+            "memory_type": "episodic",
+            "visit_date": date,
+            "document_id": str(result.inserted_id)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "memory_type": "episodic"
+        }
+
+# Alias for MCP Client Adapter compatibility
+@mcp.tool()
+async def episodic_add_visit(
+    patient_id: str,
+    date: str,
+    symptoms: str,
+    diagnosis: str,
+    prescription: str
+) -> Dict[str, str]:
+    """
+    Alias for add_episodic_memory - used by MCP Client Adapter
+    """
+    return await add_episodic_memory(patient_id, date, symptoms, diagnosis, prescription)
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    mcp.run(transport="stdio", port=8002)
